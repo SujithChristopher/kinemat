@@ -28,11 +28,10 @@ class VideoStreamApp(QWidget):
         sub_layout = QHBoxLayout()
         video_layout = QHBoxLayout()
         button_layout = QVBoxLayout()
-        
+
         force_layout = QVBoxLayout()
         
-        bottom_layout = QHBoxLayout()
-        
+        bottom_layout = QHBoxLayout()     
         # Video Labels
         self.labels = [QLabel(self) for _ in range(3)]
         for label in self.labels:
@@ -48,17 +47,20 @@ class VideoStreamApp(QWidget):
         
         self.start_record_button = QPushButton('Record')
         self.stop_record_button = QPushButton('Stop Recording')
-        
+        self.broadcast_button =  QPushButton('Boardcast')
+
         self.start_button.clicked.connect(self.start_streams)
         self.stop_button.clicked.connect(self.stop_streams)
         self.start_record_button.clicked.connect(self.start_recording)
         self.stop_record_button.clicked.connect(self.stop_recording)
+        self.broadcast_button.clicked.connect(self.send_broadcast)
         
         button_layout.addWidget(self.hospital_id_line)
         button_layout.addWidget(self.start_button)
         
         button_layout.addWidget(self.start_record_button)
         button_layout.addWidget(self.stop_record_button)
+        button_layout.addWidget(self.broadcast_button)
         button_layout.addWidget(self.stop_button)
         
         sub_layout.addLayout(video_layout)
@@ -80,13 +82,15 @@ class VideoStreamApp(QWidget):
         self.graphicsView_2.getAxis("top").setStyle(showValues=False)
         self.graphicsView_2.getAxis("right").setStyle(showValues=False)
         
-        
-        
         self.cop_graphicsView1 = pg.PlotWidget()
-        self.cop_graphicsView1.setFixedWidth(100)
+        self.cop_graphicsView1.setFixedWidth(420)
+        self.cop_graphicsView1.setXRange(-30, 30)
+        self.cop_graphicsView1.setYRange(-22.5,22.5)
         
         self.cop_graphicsView2 = pg.PlotWidget()
-        self.cop_graphicsView2.setFixedWidth(100)
+        self.cop_graphicsView2.setFixedWidth(420)
+        self.cop_graphicsView2.setXRange(-30,30)
+        self.cop_graphicsView2.setYRange(-22.5, 22.5)
         
         force_layout.addWidget(self.graphicsView_1)
         force_layout.addWidget(self.graphicsView_2)
@@ -97,7 +101,9 @@ class VideoStreamApp(QWidget):
         
 
         main_layout.addLayout(sub_layout)
-        main_layout.addWidget(bottom_layout)
+        main_layout.addLayout(bottom_layout)
+        # main_layout.addLayout(sub_layout)
+        # main_layout.addWidget(self.graphicsView_1)
         # main_layout.addWidget(self.graphicsView_2)
 
         self.setLayout(main_layout)
@@ -137,6 +143,9 @@ class VideoStreamApp(QWidget):
         self.data_line2_2 = self.graphicsView_2.plot(self.mobbo_x, np.zeros((1000)), pen=self.green_pen, name='ay')
         self.data_line2_3 = self.graphicsView_2.plot(self.mobbo_x, np.zeros((1000)), pen=self.blue_pen, name='az')
         self.data_line2_4 = self.graphicsView_2.plot(self.mobbo_x, np.zeros((1000)), pen=self.orange_pen, name='gx')
+        
+        self.cop_plot1 = self.cop_graphicsView1.plot([0],[0], pen=None, symbol='o')
+        self.cop_plot2 = self.cop_graphicsView2.plot([0], [0], pen=None, symbol='o')
     
         self.camera_frames = [None, None, None]
 
@@ -144,7 +153,10 @@ class VideoStreamApp(QWidget):
         self.mobbo_stream.run()
         
         self.start_record_camera = False
-        
+    
+    def send_broadcast(self):
+        self.mobbo_stream.send_broadcast()
+    
     def open_camera_files(self):
         
         if not os.path.exists(os.path.join('data', self.hospital_id)):
@@ -183,6 +195,9 @@ class VideoStreamApp(QWidget):
 
         data1 = self.mobbo_stream.plot_data_id1
         data2 = self.mobbo_stream.plot_data_id2
+        
+        cop1 = self.mobbo_stream.cop1
+        cop2 = self.mobbo_stream.cop2
 
         self.data_line1_1.setData(self.mobbo_x, data1[0, :])
         self.data_line1_2.setData(self.mobbo_x, data1[1, :])
@@ -193,10 +208,17 @@ class VideoStreamApp(QWidget):
         self.data_line2_2.setData(self.mobbo_x, data2[1, :])
         self.data_line2_3.setData(self.mobbo_x, data2[2, :])
         self.data_line2_4.setData(self.mobbo_x, data2[3, :])
+
+        # self.cop_plot1.setData([cop1[0]], [cop1[1]])
+        # se
+    
+        """plot a single point"""
+        self.cop_plot2.setData([cop1[0]], [cop1[1]])
+        self.cop_plot1.setData([cop2[0]], [cop2[1]])
     
     def start_streams(self):
         
-        self.plot_timer.start(30)
+        self.plot_timer.start()
 
         if not self.running:
             self.running = True
@@ -204,7 +226,7 @@ class VideoStreamApp(QWidget):
                 self.pipelines[i] = rs.pipeline()
                 config = rs.config()
                 config.enable_device(self.serials[i])
-                config.enable_stream(rs.stream.color, 640, 480, rs.format.rgb8, 30)
+                config.enable_stream(rs.stream.color, 1280, 720, rs.format.rgb8, 30)
                 self.pipelines[i].start(config)
             self.timer.start(30)  # 30 ms interval
     
@@ -226,14 +248,15 @@ class VideoStreamApp(QWidget):
                 
                 color_frame = frames.get_color_frame() 
                 frame_array = np.asanyarray(color_frame.get_data())    
+                resized_frame = cv2.resize(frame_array, (640,480))
 
                 if self.start_record_camera:
                     self.camera_files[i].write(mp.packb(frame_array, default=mpn.encode))
                 
                 if color_frame:
-                    h, w, ch = frame_array.shape
+                    h, w, ch = resized_frame.shape
                     bytes_per_line = ch * w
-                    qt_img = QImage(frame_array.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                    qt_img = QImage(resized_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
                     self.labels[i].setPixmap(QPixmap.fromImage(qt_img))
 
 if __name__ == "__main__":

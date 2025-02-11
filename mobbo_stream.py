@@ -11,6 +11,7 @@ import threading
 import numpy as np
 import os
 from numba import njit
+import polars as pl
 
 @njit()
 def roll(data):
@@ -50,6 +51,8 @@ class MobboCom(object):
         self.start_rec = False
 
         stdout.write("Initializing mobbo program\n")
+        
+        self.calib_df = pl.read_csv('calibration/calib.csv')
 
     def jedi_read(self, _bytes):
         """returns bool for valid read, also returns the data read"""
@@ -129,14 +132,41 @@ class MobboCom(object):
             match self.current_id:
                 case 1:
                     data = struct.unpack('4l', return_message[0][4:4+16])
-                    self.plot_data_id1[:, -1] = data
+                    
+                    self.force_b1 = np.divide(data - self.calib_df['lc_offset'][0:4].to_numpy(), self.calib_df['lc_scalar'][0:4].to_numpy())
+                    
+                    self.w_1 = np.sum(self.force_b1)
+                    # print(self.w_1)
+                    
+                    if np.abs(self.w_1) > 5:
+                        copx = -1*(57/2)*((self.force_b1[0] + self.force_b1[3]) - (self.force_b1[2] + self.force_b1[1]))/self.w_1
+                        copy = -1*(42/2)*((self.force_b1[2] + self.force_b1[3]) - (self.force_b1[0] + self.force_b1[1]))/self.w_1
+                        # print(copx, copy)
+                        self.cop1 = [copx, copy]
+                    else:
+                        self.cop1 = [0, 0]
+                    
+                    self.plot_data_id1[:, -1] = self.force_b1
                     self.plot_data_id1 = np.roll(self.plot_data_id1, -1, axis=1)
-                    # self.plot_data_id1 = roll(self.plot_data_id1)
                     if self.start_rec:
                         self.csv_writer1.writerow([rs_time(),*data])
                 case 2:
                     data = struct.unpack('4l', return_message[0][4:4+16])
-                    self.plot_data_id2[:, -1] = data
+                    self.force_b2 = np.divide(data - self.calib_df['lc_offset'][4:8].to_numpy(), self.calib_df['lc_scalar'][4:8].to_numpy())
+
+                    self.w_2 = np.sum(self.force_b2)
+                    # print(self.w_2)
+                    
+                    if np.abs(self.w_2) > 5:
+                        copx = -1*(57/2)*((self.force_b2[0] + self.force_b2[3]) - (self.force_b2[2] + self.force_b2[1]))/self.w_2
+                        copy = -1*(42/2)*((self.force_b2[2] + self.force_b2[3]) - (self.force_b2[0] + self.force_b2[1]))/self.w_2
+                        self.cop2 = [copx, copy]
+                        # print(copx, copy)
+                    else:
+                        self.cop2 = [0, 0]
+                        
+                        
+                    self.plot_data_id2[:, -1] = self.force_b2
                     self.plot_data_id2 = np.roll(self.plot_data_id2, -1, axis=1)
                     if self.start_rec:
                         self.csv_writer2.writerow([rs_time(), *data])
